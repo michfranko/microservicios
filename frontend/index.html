@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,10 +13,12 @@
             margin: 0;
             padding: 20px;
         }
+
         h1 {
             text-align: center;
             color: #333;
         }
+
         .container {
             max-width: 800px;
             margin: auto;
@@ -24,9 +27,11 @@
             border-radius: 8px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         }
+
         .section {
             margin-bottom: 30px;
         }
+
         .button {
             display: inline-block;
             padding: 10px 20px;
@@ -39,25 +44,32 @@
             cursor: pointer;
             border: none;
         }
+
         .button:hover {
             background-color: #0056b3;
         }
+
         .form-group {
             margin-bottom: 15px;
         }
+
         label {
             display: block;
             margin-bottom: 5px;
         }
-        input, textarea {
+
+        input,
+        textarea {
             width: 100%;
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 5px;
         }
+
         textarea {
             resize: vertical;
         }
+
         .result {
             margin-top: 20px;
             padding: 10px;
@@ -65,10 +77,12 @@
             border-radius: 5px;
             white-space: pre-wrap;
         }
+
         .product-list {
             display: flex;
             flex-wrap: wrap;
         }
+
         .product-item {
             border: 1px solid #ccc;
             padding: 10px;
@@ -76,15 +90,17 @@
             cursor: pointer;
             background-color: #fff;
         }
+
         .product-item.selected {
             background-color: #e0e0e0;
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <h1>Compra de Productos</h1>
-        
+
         <div class="section">
             <h2>Agregar Producto</h2>
             <form id="addProductForm">
@@ -108,13 +124,17 @@
             </form>
             <div id="addProductResult" class="result"></div>
         </div>
-        
+
         <div class="section">
             <h2>Productos Disponibles</h2>
-            <button type="button" class="button" onclick="loadProducts()">Recargar Productos</button>
             <div id="products" class="product-list"></div>
         </div>
-        
+
+        <div class="section">
+            <h2>Producto Seleccionado</h2>
+            <div id="selectedProductDetails" class="result"></div>
+        </div>
+
         <div class="section">
             <h2>Crear Orden</h2>
             <form id="orderForm">
@@ -122,19 +142,31 @@
                     <label for="destination">Destino:</label>
                     <input type="text" id="destination" placeholder="Ingrese el destino">
                 </div>
+                <div class="form-group">
+                    <label for="quantity">Cantidad:</label>
+                    <input type="number" id="quantity" min="1" value="1" required>
+                </div>
                 <button type="button" class="button" onclick="createOrder()">Comprar</button>
             </form>
             <div id="orderResult" class="result"></div>
+        </div>
+
+        <div class="section">
+            <h2>Órdenes Realizadas</h2>
+            <button class="button" onclick="loadOrders()">Refrescar Órdenes</button>
+            <div id="ordersList" class="result"></div>
         </div>
     </div>
     <script>
         const baseUrl = 'http://localhost:8080/api';
         let selectedProduct = null;
+        let products = [];
 
         function loadProducts() {
             fetch(`${baseUrl}/products`)
                 .then(response => response.json())
-                .then(products => {
+                .then(data => {
+                    products = data;
                     const productsDiv = document.getElementById('products');
                     productsDiv.innerHTML = '';
                     products.forEach(product => {
@@ -154,10 +186,17 @@
             // Deselect previous
             const previous = document.querySelector('.product-item.selected');
             if (previous) previous.classList.remove('selected');
-            
+
             // Select new
             element.classList.add('selected');
             selectedProduct = id;
+
+            // Show details
+            const product = products.find(p => p.id === id);
+            if (product) {
+                document.getElementById('selectedProductDetails').textContent =
+                    `ID: ${product.id}\nNombre: ${product.name}\nDescripción: ${product.description}\nPrecio: $${product.price}\nStock: ${product.stock}`;
+            }
         }
 
         function addProduct() {
@@ -176,62 +215,123 @@
                 },
                 body: JSON.stringify({ name, description, price, stock }),
             })
-            .then(response => response.json())
-            .then(result => {
-                document.getElementById('addProductResult').textContent = JSON.stringify(result, null, 2);
-                // Limpiar formulario
-                document.getElementById('addProductForm').reset();
-                loadProducts(); // Recargar lista
+                .then(response => response.json())
+                .then(result => {
+                    document.getElementById('addProductResult').textContent = JSON.stringify(result, null, 2);
+                    // Limpiar formulario
+                    document.getElementById('addProductForm').reset();
+                    loadProducts(); // Recargar lista
+                })
+                .catch(error => {
+                    document.getElementById('addProductResult').textContent = 'Error: ' + error.message;
+                });
+        }
+
+
+        function createOrder() {
+            const destination = document.getElementById('destination').value;
+            const quantity = parseInt(document.getElementById('quantity').value);
+
+            if (!selectedProduct || !destination || isNaN(quantity) || quantity < 1) {
+                alert('Por favor, seleccione un producto, ingrese destino y cantidad válida.');
+                return;
+            }
+
+            fetch(`${baseUrl}/orders`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    productId: selectedProduct,
+                    destination: destination,
+                    quantity: quantity
+                }),
             })
-            .catch(error => {
-                document.getElementById('addProductResult').textContent = 'Error: ' + error.message;
-            });
+                .then(async response => {
+                    const text = await response.text();
+
+                    if (!response.ok) {
+                        throw new Error(text || 'Error creando la orden');
+                    }
+
+                    try {
+                        return JSON.parse(text);
+                    } catch {
+                        throw new Error('Respuesta no válida del servidor: ' + text);
+                    }
+                })
+                .then(result => {
+                    document.getElementById('orderResult').textContent =
+                        JSON.stringify(result, null, 2);
+                    // Recargar productos para actualizar stock
+                    loadProducts();
+                    // Limpiar formulario
+                    document.getElementById('orderForm').reset();
+                    selectedProduct = null;
+                    document.getElementById('selectedProductDetails').textContent = '';
+                    const previous = document.querySelector('.product-item.selected');
+                    if (previous) previous.classList.remove('selected');
+                })
+                .catch(error => {
+                    document.getElementById('orderResult').textContent =
+                        'Error: ' + error.message;
+                });
         }
 
-       
-function createOrder() {
-    const destination = document.getElementById('destination').value;
+        function loadOrders() {
+            fetch(`${baseUrl}/orders`)
+                .then(response => response.json())
+                .then(data => {
+                    const ordersDiv = document.getElementById('ordersList');
+                    ordersDiv.innerHTML = '';
+                    if (data.length === 0) {
+                        ordersDiv.textContent = 'No hay órdenes registradas.';
+                        return;
+                    }
 
-    if (!selectedProduct || !destination) {
-        alert('Por favor, seleccione un producto e ingrese destino.');
-        return;
-    }
+                    const table = document.createElement('table');
+                    table.style.width = '100%';
+                    table.style.borderCollapse = 'collapse';
 
-    fetch(`${baseUrl}/orders`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            productId: selectedProduct,
-            destination: destination
-        }),
-    })
-    .then(async response => {
-        const text = await response.text();
+                    const thead = document.createElement('thead');
+                    thead.innerHTML = `
+            <tr style="background-color: #f2f2f2;">
+                <th style="border: 1px solid #ddd; padding: 8px;">ID</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">Producto ID</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">Destino</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">Cantidad</th>
+                <th style="border: 1px solid #ddd; padding: 8px;">Total</th>
+            </tr>
+        `;
+                    table.appendChild(thead);
 
-        if (!response.ok) {
-            throw new Error(text || 'Error creando la orden');
+                    const tbody = document.createElement('tbody');
+                    data.forEach(order => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                <td style="border: 1px solid #ddd; padding: 8px;">${order.id}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">${order.productIds}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">${order.destination}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">${order.quantity}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">$${order.total.toFixed(2)}</td>
+            `;
+                        tbody.appendChild(row);
+                    });
+                    table.appendChild(tbody);
+                    ordersDiv.appendChild(table);
+                })
+                .catch(error => {
+                    document.getElementById('ordersList').textContent = 'Error al cargar órdenes: ' + error.message;
+                });
         }
 
-        try {
-            return JSON.parse(text);
-        } catch {
-            throw new Error('Respuesta no válida del servidor: ' + text);
-        }
-    })
-    .then(result => {
-        document.getElementById('orderResult').textContent =
-            JSON.stringify(result, null, 2);
-    })
-    .catch(error => {
-        document.getElementById('orderResult').textContent =
-            'Error: ' + error.message;
-    });
-}
 
-
-        window.onload = loadProducts;
+        window.onload = () => {
+            loadProducts();
+            loadOrders();
+        };
     </script>
 </body>
+
 </html>

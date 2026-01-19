@@ -1,72 +1,125 @@
 services:
-  postgres:
-    image: postgres:15
-    container_name: postgres
+  # ==================== DATABASES ====================
+  product-db:
+    image: postgres:16
+    container_name: product-db
+    restart: always
     environment:
-      POSTGRES_DB: products_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: product_db
+      POSTGRES_USER: product_user
+      POSTGRES_PASSWORD: product_pass
+    volumes:
+      - product_data:/var/lib/postgresql/data
+    networks:
+      - microservices-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U product_user -d product_db"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
-  mysql:
+  order-db:
     image: mysql:8.0
-    container_name: mysql
+    container_name: order-db
+    restart: always
     environment:
-      MYSQL_DATABASE: orders_db
-      MYSQL_USER: mysql
-      MYSQL_PASSWORD: mysql
-      MYSQL_ROOT_PASSWORD: root
-    ports:
-      - "3306:3306"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "mysql -u$$MYSQL_USER -p$$MYSQL_PASSWORD -e 'SELECT 1' $$MYSQL_DATABASE"
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  products_service:
-    build: ./products_service
-    container_name: products_service
-    ports:
-      - "8081:8081"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  shipping_service:
-    build: ./shipping_service
-    container_name: shipping_service
-    ports:
-      - "8082:8082"
-
-  orders_service:
-    build: ./orders_service
-    container_name: orders_service
-    ports:
-      - "8083:8083"
-    depends_on:
-      mysql:
-        condition: service_healthy
-    restart: unless-stopped
-
-  api_gateway:
-    build: ./api_gateway
-    container_name: api_gateway
-    ports:
-      - "8080:80"
+      MYSQL_DATABASE: order_db
+      MYSQL_USER: order_user
+      MYSQL_PASSWORD: order_pass
+      MYSQL_ROOT_PASSWORD: root_password
     volumes:
-      - ./frontend:/usr/share/nginx/html
+      - order_data:/var/lib/mysql
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== MICROSERVICES ====================
+  product-service:
+    build: ./product-service
+    container_name: product-service
+    restart: always
     depends_on:
-      - products_service
-      - shipping_service
-      - orders_service
+      product-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://product-db:5432/product_db
+      SPRING_DATASOURCE_USERNAME: product_user
+      SPRING_DATASOURCE_PASSWORD: product_pass
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/products || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  shipping-service:
+    build: ./shipping-service
+    container_name: shipping-service
+    restart: always
+    networks:
+      - microservices-net
+
+  order-service:
+    build: ./order-service
+    container_name: order-service
+    restart: always
+    depends_on:
+      product-service:
+        condition: service_healthy
+      shipping-service:
+        condition: service_started
+      order-db:
+        condition: service_healthy
+    environment:
+      PRODUCT_API_URL: http://product-service:8081
+      SHIPPING_API_URL: http://shipping-service:8082
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:mysql://order-db:3306/order_db
+      QUARKUS_DATASOURCE_USERNAME: order_user
+      QUARKUS_DATASOURCE_PASSWORD: order_pass
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/orders/1 || echo 'still starting'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ==================== API GATEWAY ====================
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    restart: always
+    depends_on:
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_started
+      shipping-service:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    networks:
+      - microservices-net
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./api-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+# ==================== NETWORKING ====================
+networks:
+  microservices-net:
+    driver: bridge
+
+# ==================== VOLUMES ====================
+volumes:
+  product_data:
+  order_data:
